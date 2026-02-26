@@ -227,8 +227,8 @@ export default function Settings({ onNavigateBack }: SettingsProps) {
                 <input
                   type="text"
                   value={appUser?.["Device Name"] || ''}
-                  onChange={(e) => setAppUser(prev => prev ? ({ ...prev, "Device Name": e.target.value }) : null)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  readOnly
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-100 text-gray-500 cursor-not-allowed"
                   placeholder="e.g., ESP32_E61930"
                 />
               </div>
