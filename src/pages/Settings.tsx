@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Save, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Calculator } from 'lucide-react';
 import { collection, getDocs, query, orderBy, limit, doc, updateDoc, addDoc, deleteDoc, where, setDoc } from 'firebase/firestore';
 import { ref, get, update } from 'firebase/database';
 import { db, rtdb, Switch, EBTariffSlab, BillingSettings, auth, AppUser } from '../lib/firebase';
@@ -10,7 +10,7 @@ interface SettingsProps {
 
 export default function Settings({ onNavigateBack }: SettingsProps) {
   const [tariffSlabs, setTariffSlabs] = useState<EBTariffSlab[]>([]);
-  const [billingSettings, setBillingSettings] = useState<BillingSettings | null>(null);
+  const [billingSettings, setBillingSettings] = useState<any>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [switches, setSwitches] = useState<Switch[]>([]);
   const [successMessage, setSuccessMessage] = useState('');
@@ -57,7 +57,7 @@ export default function Settings({ onNavigateBack }: SettingsProps) {
     ]);
 
     const tariffData = tariffSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as EBTariffSlab));
-    const settingsData = settingsSnapshot.empty ? null : { id: settingsSnapshot.docs[0].id, ...settingsSnapshot.docs[0].data() } as BillingSettings;
+    const settingsData = settingsSnapshot.empty ? null : { id: settingsSnapshot.docs[0].id, ...settingsSnapshot.docs[0].data() };
 
     setTariffSlabs(tariffData);
     setBillingSettings(settingsData);
@@ -74,7 +74,8 @@ export default function Settings({ onNavigateBack }: SettingsProps) {
               id: String(i),
               name: s?.name || `Switch ${i + 1}`,
               device_type: s?.device_type || 'other',
-              is_on: !!s?.is_on
+              is_on: !!s?.is_on,
+              wattage: s?.wattage || 0
             }))
           : Object.entries(data)
               .filter(([key]) => key !== 'Question' && key !== 'Answer')
@@ -83,15 +84,16 @@ export default function Settings({ onNavigateBack }: SettingsProps) {
               id: key,
               name: value?.name || `Switch ${key}`,
               device_type: value?.device_type || 'other',
-              is_on: !!value?.is_on
+              is_on: !!value?.is_on,
+              wattage: value?.wattage || 0
             }));
         setSwitches(loadedSwitches);
       } else {
         setSwitches([
-          { id: '0', name: 'Switch 1', device_type: 'bulb', is_on: false, switch_number: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-          { id: '1', name: 'Switch 2', device_type: 'fan', is_on: false, switch_number: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-          { id: '2', name: 'Switch 3', device_type: 'tv', is_on: false, switch_number: 3, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-          { id: '3', name: 'Switch 4', device_type: 'fridge', is_on: false, switch_number: 4, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+          { id: '0', name: 'Switch 1', device_type: 'bulb', is_on: false, switch_number: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), wattage: 0 } as any,
+          { id: '1', name: 'Switch 2', device_type: 'fan', is_on: false, switch_number: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), wattage: 0 } as any,
+          { id: '2', name: 'Switch 3', device_type: 'tv', is_on: false, switch_number: 3, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), wattage: 0 } as any,
+          { id: '3', name: 'Switch 4', device_type: 'fridge', is_on: false, switch_number: 4, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), wattage: 0 } as any,
         ]);
       }
     }
@@ -124,22 +126,15 @@ export default function Settings({ onNavigateBack }: SettingsProps) {
     loadSettings();
   }
 
-  async function updateBillingSettings(field: keyof BillingSettings, value: number) {
-    if (!appUser?.id) return;
-    if (billingSettings) {
-      const settingsRef = doc(db, `Users/${appUser.id}/billing_settings`, billingSettings.id);
-      await updateDoc(settingsRef, { [field]: value, updated_at: new Date().toISOString() });
-    } else {
-      await addDoc(collection(db, `Users/${appUser.id}/billing_settings`), { 
-        [field]: value, 
-        updated_at: new Date().toISOString(),
-        current_month_start: new Date().toISOString() // Default value if creating new
-      });
-    }
-    loadSettings();
+  function updateBillingSettings(field: string, value: string | number) {
+    setBillingSettings((prev: any) => {
+      const newData = prev ? { ...prev } : {};
+      newData[field] = value;
+      return newData;
+    });
   }
 
-  function updateSwitchLocal(id: string, field: keyof Switch, value: string) {
+  function updateSwitchLocal(id: string, field: string, value: string | number) {
     setSwitches(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s));
   }
 
@@ -169,10 +164,35 @@ export default function Settings({ onNavigateBack }: SettingsProps) {
            updates[`${basePath}/device_type`] = sw.device_type;
            updates[`${basePath}/switch_number`] = sw.switch_number;
            updates[`${basePath}/is_on`] = sw.is_on;
+           updates[`${basePath}/wattage`] = (sw as any).wattage || 0;
            updates[`${basePath}/updated_at`] = new Date().toISOString();
            if (!sw.created_at) updates[`${basePath}/created_at`] = new Date().toISOString();
         });
         await update(ref(rtdb), updates);
+      }
+
+      // Save Billing Settings
+      if (billingSettings) {
+        const target = parseFloat(String(billingSettings.monthly_target));
+        const maxPower = parseFloat(String(billingSettings.max_power_limit));
+        const months = parseInt(String(billingSettings.billing_months));
+        
+        const billingData = {
+          monthly_target: isNaN(target) ? 0 : target,
+          billing_months: isNaN(months) ? 1 : months,
+          max_power_limit: isNaN(maxPower) ? 0 : maxPower,
+          updated_at: new Date().toISOString()
+        };
+
+        if (billingSettings.id) {
+          const settingsRef = doc(db, `Users/${appUser.id}/billing_settings`, billingSettings.id);
+          await updateDoc(settingsRef, billingData);
+        } else {
+          await addDoc(collection(db, `Users/${appUser.id}/billing_settings`), { 
+            ...billingData,
+            current_month_start: new Date().toISOString() 
+          });
+        }
       }
     }
     showSuccess();
@@ -181,6 +201,23 @@ export default function Settings({ onNavigateBack }: SettingsProps) {
 
   function showSuccess() {
     setSuccessMessage('Settings saved successfully!');
+    setTimeout(() => setSuccessMessage(''), 3000);
+  }
+
+  function autoCalculateLimits() {
+    const totalWattage = switches.reduce((acc, sw) => acc + ((sw as any).wattage || 0), 0);
+    const months = billingSettings?.billing_months || 1;
+
+    // Max Power Limit: Total Wattage + 10% buffer
+    const maxPower = Math.ceil(totalWattage * 1.1);
+
+    // Target: Total Wattage * 24 hours * 30 days * Months (converted to kWh)
+    const calculatedTarget = (totalWattage * 24 * 30 * months) / 1000;
+
+    updateBillingSettings('max_power_limit', maxPower);
+    updateBillingSettings('monthly_target', parseFloat(calculatedTarget.toFixed(3)));
+    
+    setSuccessMessage(`Auto-calculated limits based on ${totalWattage}W total load.`);
     setTimeout(() => setSuccessMessage(''), 3000);
   }
 
@@ -240,7 +277,7 @@ export default function Settings({ onNavigateBack }: SettingsProps) {
               <h2 className="text-2xl font-bold text-gray-900 mb-6">Switch Configuration</h2>
               <div className="space-y-4">
                 {switches.map((sw) => (
-                  <div key={sw.id} className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-xl">
+                  <div key={sw.id} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-xl">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Switch {sw.switch_number} Name
@@ -269,6 +306,18 @@ export default function Settings({ onNavigateBack }: SettingsProps) {
                         <option value="heater">Heater</option>
                         <option value="other">Other</option>
                       </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Rated Wattage (W)
+                      </label>
+                      <input
+                        type="number"
+                        value={(sw as any).wattage || ''}
+                        onChange={(e) => updateSwitchLocal(sw.id, 'wattage', parseFloat(e.target.value) || 0)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g. 60"
+                      />
                     </div>
                   </div>
                 ))}
@@ -337,7 +386,17 @@ export default function Settings({ onNavigateBack }: SettingsProps) {
           </div>
 
           <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-200">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Billing Settings</h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Billing Settings</h2>
+              <button
+                onClick={autoCalculateLimits}
+                className="flex items-center gap-2 text-blue-600 hover:text-blue-700 text-sm font-medium transition-colors bg-blue-50 px-3 py-2 rounded-lg"
+                title="Calculate based on connected switches"
+              >
+                <Calculator className="w-4 h-4" />
+                Auto-Calculate Limits
+              </button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -352,6 +411,33 @@ export default function Settings({ onNavigateBack }: SettingsProps) {
                     <option key={month} value={month}>{month} Month{month > 1 ? 's' : ''}</option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Monthly Target (Units/kWh)
+                </label>
+                <input
+                  type="number"
+                  min="0.001"
+                  step="0.001"
+                  value={billingSettings?.monthly_target ?? ''}
+                  onChange={(e) => updateBillingSettings('monthly_target', e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Set target limit"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Max Power Limit (W)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={billingSettings?.max_power_limit ?? ''}
+                  onChange={(e) => updateBillingSettings('max_power_limit', e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g. 2000"
+                />
               </div>
             </div>
           </div>

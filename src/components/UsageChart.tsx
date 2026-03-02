@@ -1,8 +1,13 @@
-import { DailyUsageSummary, Switch } from '../lib/supabase';
 import { formatCurrency } from '../utils/billCalculator';
 
+export interface DailyUsageSummary {
+  date: string;
+  total_energy: number;
+  cost: number;
+}
+
 interface UsageChartProps {
-  dailyData: (DailyUsageSummary & { switch: Switch })[];
+  dailyData: DailyUsageSummary[];
 }
 
 export default function UsageChart({ dailyData }: UsageChartProps) {
@@ -15,7 +20,7 @@ export default function UsageChart({ dailyData }: UsageChartProps) {
 
       <div className="space-y-4">
         {last7Days.map((day, index) => {
-          const date = new Date(day.usage_date);
+          const date = new Date(day.date);
           const percentage = (day.total_energy / maxEnergy) * 100;
 
           return (
@@ -25,7 +30,6 @@ export default function UsageChart({ dailyData }: UsageChartProps) {
                   <span className="font-medium text-gray-900 w-24">
                     {date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
                   </span>
-                  <span className="text-gray-500">{day.switch.name}</span>
                 </div>
                 <div className="flex items-center gap-4">
                   <span className="font-semibold text-gray-900">
