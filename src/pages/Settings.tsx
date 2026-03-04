@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Save, Plus, Trash2, Calculator } from 'lucide-react';
-import { collection, getDocs, query, orderBy, limit, doc, updateDoc, addDoc, deleteDoc, where, setDoc } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, limit, doc, updateDoc, addDoc, deleteDoc, where } from 'firebase/firestore';
 import { ref, get, update } from 'firebase/database';
-import { db, rtdb, Switch, EBTariffSlab, BillingSettings, auth, AppUser } from '../lib/firebase';
+import { db, rtdb, Switch, EBTariffSlab, auth, AppUser } from '../lib/firebase';
 
 interface SettingsProps {
   onNavigateBack: () => void;

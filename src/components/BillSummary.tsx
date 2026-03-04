@@ -7,6 +7,7 @@ interface BillSummaryProps {
   billingPeriod: number;
   isToday: boolean;
   todayUsage: number;
+  selectedDate: string;
   dateRange?: string;
 }
 
@@ -17,9 +18,18 @@ export default function BillSummary({
   dateRange,
   isToday,
   todayUsage,
+  selectedDate,
 }: BillSummaryProps) {
+  const formattedDate = new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+
+      {/* Card 1: Bill Amount for Billing Cycle */}
       <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-6 text-white shadow-xl shadow-blue-500/30">
         <div className="flex items-center justify-between mb-4">
           <div className="p-3 bg-white/20 rounded-xl">
@@ -30,16 +40,19 @@ export default function BillSummary({
           </span>
         </div>
         <div className="text-3xl font-bold mb-1">{formatCurrency(estimatedBill)}</div>
-        <div className="text-sm text-blue-100">Current Billing Period</div>
+        <div className="text-sm text-blue-100">
+          {dateRange ? dateRange : `${billingPeriod} Month Period`}
+        </div>
       </div>
 
+      {/* Card 2: Total Units for Billing Cycle */}
       <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-6 text-white shadow-xl shadow-orange-500/30">
         <div className="flex items-center justify-between mb-4">
           <div className="p-3 bg-white/20 rounded-xl">
             <Zap className="w-6 h-6" />
           </div>
           <span className="text-sm font-medium bg-white/20 px-3 py-1 rounded-full">
-            Total Units
+            Cycle Total
           </span>
         </div>
         <div className="text-3xl font-bold mb-1">{totalUnits.toFixed(3)} kWh</div>
@@ -48,6 +61,7 @@ export default function BillSummary({
         </div>
       </div>
 
+      {/* Card 3: Selected Date Daily Consumption */}
       <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl p-6 text-white shadow-xl shadow-purple-500/30">
         <div className="flex items-center justify-between mb-4">
           <div className="p-3 bg-white/20 rounded-xl">
@@ -58,9 +72,10 @@ export default function BillSummary({
           </span>
         </div>
         <div className="text-3xl font-bold mb-1">{todayUsage.toFixed(3)} kWh</div>
-        <div className="text-sm text-purple-100">Daily Consumption</div>
+        <div className="text-sm text-purple-100">{formattedDate}</div>
       </div>
 
+      {/* Card 4: Billing Cycle Duration */}
       <div className="bg-gradient-to-br from-teal-500 to-teal-600 rounded-2xl p-6 text-white shadow-xl shadow-teal-500/30">
         <div className="flex items-center justify-between mb-4">
           <div className="p-3 bg-white/20 rounded-xl">
@@ -73,6 +88,7 @@ export default function BillSummary({
         <div className="text-3xl font-bold mb-1">{billingPeriod}</div>
         <div className="text-sm text-teal-100">Month{billingPeriod > 1 ? 's' : ''}</div>
       </div>
+
     </div>
   );
 }

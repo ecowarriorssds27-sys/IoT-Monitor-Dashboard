@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Settings, Activity, Zap, Gauge, Lightbulb, Battery, History, Calendar, Wifi, WifiOff, LogOut, AlertTriangle, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { collection, query, where, getDocs, onSnapshot, orderBy, limit, doc, getDoc } from 'firebase/firestore';
+import { Settings, Activity, Zap,  Lightbulb, Battery, History,  Wifi, WifiOff, LogOut, AlertTriangle, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { collection, query, where, getDocs, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { ref, onValue, set } from 'firebase/database';
 import { signOut } from 'firebase/auth';
 import { db, auth, AppUser, PowerReading, rtdb, Switch, EBTariffSlab } from '../lib/firebase';
@@ -29,8 +29,7 @@ export default function Dashboard({ onNavigateToSettings }: DashboardProps) {
   const [isOverloaded, setIsOverloaded] = useState(false);
   const [billingMonths, setBillingMonths] = useState(1);
   const [cycleRange, setCycleRange] = useState({ start: new Date(), end: new Date() });
-  const [startCycleEnergy, setStartCycleEnergy] = useState<number>(0);
-  const [endCycleEnergy, setEndCycleEnergy] = useState<number>(0);
+  const [cycleTotalUnits, setCycleTotalUnits] = useState<number>(0);
   
   // State for selected date, defaulting to today (local time)
   const [selectedDate, setSelectedDate] = useState<string>(() => {
@@ -144,56 +143,49 @@ export default function Dashboard({ onNavigateToSettings }: DashboardProps) {
     return () => unsubscribe();
   }, [deviceName, selectedDate]);
 
-  // Effect to fetch Start/End energy for the Billing Cycle
+  // Effect to fetch total units for the Billing Cycle using per-day delta summation.
+  // This correctly handles the PZEM cumulative energy counter across month boundaries.
+  // For each day in the cycle, we compute (last_energy - first_energy) = that day's consumption,
+  // then sum all days. This prevents February data leaking into March, etc.
   useEffect(() => {
     if (!deviceName) return;
 
     const fetchCycleData = async () => {
-      const startDateStr = cycleRange.start.toISOString().split('T')[0];
-      const endDateStr = cycleRange.end.toISOString().split('T')[0];
-      
       const today = new Date();
-      const offset = today.getTimezoneOffset();
-      const localToday = new Date(today.getTime() - (offset * 60 * 1000));
-      const todayStr = localToday.toISOString().split('T')[0];
       today.setHours(0, 0, 0, 0);
-      
-      // Check if the cycle includes today or is in the future
-      const isCurrentCycle = cycleRange.end >= today;
+
+      // Build list of dates in the cycle up to today
+      const dates: string[] = [];
+      const cursor = new Date(cycleRange.start);
+      const cycleEnd = cycleRange.end < today ? cycleRange.end : today;
+
+      while (cursor <= cycleEnd) {
+        const offset = cursor.getTimezoneOffset();
+        const local = new Date(cursor.getTime() - offset * 60 * 1000);
+        dates.push(local.toISOString().split('T')[0]);
+        cursor.setDate(cursor.getDate() + 1);
+      }
 
       try {
-        // 1. Get Start Energy
-        const startRef = collection(db, 'power_data', deviceName, startDateStr);
-        const startQuery = query(startRef, orderBy('time', 'asc'), limit(1));
-        const startSnap = await getDocs(startQuery);
-        let startVal = 0;
-        
-        if (!startSnap.empty) {
-          startVal = (startSnap.docs[0].data() as PowerReading).energy;
-        } else {
-          // Fallback: Try previous day's last reading to handle missing data at start of cycle
-          const prevDate = new Date(cycleRange.start);
-          prevDate.setDate(prevDate.getDate() - 1);
-          const prevDateStr = prevDate.toISOString().split('T')[0];
-          const prevRef = collection(db, 'power_data', deviceName, prevDateStr);
-          const prevQuery = query(prevRef, orderBy('time', 'desc'), limit(1));
-          const prevSnap = await getDocs(prevQuery);
-          if (!prevSnap.empty) {
-            startVal = (prevSnap.docs[0].data() as PowerReading).energy;
-          }
-        }
-        setStartCycleEnergy(startVal);
+        let total = 0;
 
-        // 2. Get End Energy
-        // If current cycle, fetch latest from TODAY to ensure we have a fallback if liveReading is unavailable
-        // If past cycle, fetch latest from endDate
-        const targetDateStr = isCurrentCycle ? todayStr : endDateStr;
-        
-        const endRef = collection(db, 'power_data', deviceName, targetDateStr);
-        const endQuery = query(endRef, orderBy('time', 'desc'), limit(1));
-        const endSnap = await getDocs(endQuery);
-        const endVal = !endSnap.empty ? (endSnap.docs[0].data() as PowerReading).energy : 0;
-        setEndCycleEnergy(endVal);
+        for (const dateStr of dates) {
+          const dayRef = collection(db, 'power_data', deviceName, dateStr);
+          const allQ = query(dayRef, orderBy('time', 'asc'));
+          const allSnap = await getDocs(allQ);
+
+          if (allSnap.size >= 2) {
+            // Incremental diff sum — same logic as dayConsumption useMemo
+            const readings = allSnap.docs.map(d => (d.data() as PowerReading).energy);
+            for (let i = 1; i < readings.length; i++) {
+              const diff = readings[i] - readings[i - 1];
+              total += diff >= 0 ? diff : readings[i];
+            }
+          }
+          // Single reading days contribute 0 (can't compute delta)
+        }
+
+        setCycleTotalUnits(total);
       } catch (e) {
         console.error("Error fetching cycle data:", e);
       }
@@ -355,26 +347,8 @@ export default function Dashboard({ onNavigateToSettings }: DashboardProps) {
   // We always want the CURRENT total accumulated units for the bill, 
   // regardless of whether we are viewing a past date's history.
 
-  // 1. Calculate the actual units consumed within the active Billing Cycle
-  const currentTotalUnits = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const isCurrentCycle = cycleRange.end >= today;
-    
-    let end = 0;
-    if (isCurrentCycle) {
-      // Use live reading if available, otherwise fallback to endCycleEnergy (latest from today)
-      end = liveReading?.energy || endCycleEnergy || 0;
-    } else {
-      end = endCycleEnergy;
-    }
-
-    const start = startCycleEnergy;
-    // If start is 0 (missing data), calculation might be off, but we assume 0 for now
-    const consumed = end - start;
-    
-    return consumed > 0 ? consumed : 0;
-  }, [startCycleEnergy, endCycleEnergy, liveReading, cycleRange]);
+  // currentTotalUnits = sum of per-day deltas across the billing cycle (fetched async above)
+  const currentTotalUnits = cycleTotalUnits;
 
   // 2. Recalculate the bill based only on these filtered units
   const estimatedBill = useMemo(() => {
@@ -560,7 +534,8 @@ export default function Dashboard({ onNavigateToSettings }: DashboardProps) {
           billingPeriod={billingMonths}
           dateRange={cycleLabel}
           isToday={isToday}
-          todayUsage={dayConsumption} // Showing selected day consumption here
+          todayUsage={dayConsumption}
+          selectedDate={selectedDate}
         />
 
         {isOverloaded && (
